@@ -278,7 +278,6 @@ class Attention(nn.Module):
     ):
         b, n, _, h, talking_heads, device = *x.shape, self.heads, self.talking_heads, x.device
         kv_input = default(context, x)
-
         q_input = x
         k_input = kv_input
         v_input = kv_input
@@ -350,7 +349,7 @@ class Attention(nn.Module):
 
         attn = self.attn_fn(dots, dim=-1)
         post_softmax_attn = attn
-
+        
         attn = self.dropout(attn)
 
         if talking_heads:
@@ -571,6 +570,7 @@ class TransformerWrapper(nn.Module):
         self.num_tokens = num_tokens
 
         self.token_emb = nn.Embedding(num_tokens, emb_dim)
+        
         self.pos_emb = AbsolutePositionalEmbedding(emb_dim, max_seq_len) if (
                     use_pos_emb and not attn_layers.has_pos_emb) else always(0)
         self.emb_dropout = nn.Dropout(emb_dropout)
@@ -635,7 +635,7 @@ class TransformerWrapper(nn.Module):
         mem, x = x[:, :num_mem], x[:, num_mem:]
 
         out = self.to_logits(x) if not return_embeddings else x
-
+        
         if return_mems:
             hiddens = intermediates.hiddens
             new_mems = list(map(lambda pair: torch.cat(pair, dim=-2), zip(mems, hiddens))) if exists(mems) else hiddens

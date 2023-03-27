@@ -1,5 +1,7 @@
 from inspect import isfunction
 import math
+
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
@@ -86,6 +88,7 @@ class LinearAttention(nn.Module):
         self.to_out = nn.Conv2d(hidden_dim, dim, 1)
 
     def forward(self, x):
+        a = 1 / 0
         b, c, h, w = x.shape
         qkv = self.to_qkv(x)
         q, k, v = rearrange(qkv, 'b (qkv heads c) h w -> qkv b heads c (h w)', heads = self.heads, qkv=3)
@@ -124,6 +127,7 @@ class SpatialSelfAttention(nn.Module):
                                         padding=0)
 
     def forward(self, x):
+        a = 1 / 0
         h_ = x
         h_ = self.norm(h_)
         q = self.q(h_)
@@ -167,10 +171,12 @@ class CrossAttention(nn.Module):
             nn.Dropout(dropout)
         )
 
-    def forward(self, x, context=None, mask=None):
+    def forward(self, x, context=None, mask=None,store=None,place="up"):
         h = self.heads
 
         q = self.to_q(x)
+
+        is_cross = context is not None
         context = default(context, x)
         k = self.to_k(context)
         v = self.to_v(context)
@@ -187,6 +193,19 @@ class CrossAttention(nn.Module):
 
         # attention, what we cannot get enough of
         attn = sim.softmax(dim=-1)
+        if is_cross:
+
+            attn_map = attn.reshape(16, -1, 77)
+            #attn[:,:attn.shape[1]//2, 8] *= 0
+            #attn[:,attn.shape[1]//2:,5] *= 0
+
+            plt.imsave(f"{torch.randint(1,10,(1,)).item()}.png",attn_map[torch.randint(0,16,(1,)).item()].cpu().detach())
+
+
+        if store is not None:
+            store(attn.cpu(), is_cross, place)#to cpu due to memory constraints
+
+
 
         out = einsum('b i j, b j d -> b i d', attn, v)
         out = rearrange(out, '(b h) n d -> b n (h d)', h=h)
@@ -205,12 +224,12 @@ class BasicTransformerBlock(nn.Module):
         self.norm3 = nn.LayerNorm(dim)
         self.checkpoint = checkpoint
 
-    def forward(self, x, context=None):
-        return checkpoint(self._forward, (x, context), self.parameters(), self.checkpoint)
+    def forward(self, x, context=None,store = None,place="up"):
+        return checkpoint(self._forward, (x, context,store,place), self.parameters(), self.checkpoint)
 
-    def _forward(self, x, context=None):
-        x = self.attn1(self.norm1(x)) + x
-        x = self.attn2(self.norm2(x), context=context) + x
+    def _forward(self, x, context=None,store=None,place="up"):
+        x = self.attn1(self.norm1(x),store=store,place=place) + x
+        x = self.attn2(self.norm2(x), context=context,store=store,place=place) + x
         x = self.ff(self.norm3(x)) + x
         return x
 
@@ -247,7 +266,7 @@ class SpatialTransformer(nn.Module):
                                               stride=1,
                                               padding=0))
 
-    def forward(self, x, context=None):
+    def forward(self, x, context=None,store=None,place="up"):
         # note: if no context is given, cross-attention defaults to self-attention
         b, c, h, w = x.shape
         x_in = x
@@ -255,7 +274,7 @@ class SpatialTransformer(nn.Module):
         x = self.proj_in(x)
         x = rearrange(x, 'b c h w -> b (h w) c')
         for block in self.transformer_blocks:
-            x = block(x, context=context)
+            x = block(x, context=context,store=store,place=place)
         x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
         x = self.proj_out(x)
         return x + x_in

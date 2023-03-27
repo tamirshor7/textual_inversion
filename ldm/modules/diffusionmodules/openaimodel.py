@@ -6,8 +6,9 @@ from typing import Iterable
 import numpy as np
 import torch as th
 import torch.nn as nn
+from ldm.modules.attention import CrossAttention
 import torch.nn.functional as F
-
+from ldm.ptp_utils import AttentionStore
 from ldm.modules.diffusionmodules.util import (
     checkpoint,
     conv_nd,
@@ -49,6 +50,7 @@ class AttentionPool2d(nn.Module):
         self.attention = QKVAttention(self.num_heads)
 
     def forward(self, x):
+        
         b, c, *_spatial = x.shape
         x = x.reshape(b, c, -1)  # NC(HW)
         x = th.cat([x.mean(dim=-1, keepdim=True), x], dim=-1)  # NC(HW+1)
@@ -77,12 +79,12 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
     support it as an extra input.
     """
 
-    def forward(self, x, emb, context=None):
+    def forward(self, x, emb, context=None,store=None,place="up"):
         for layer in self:
             if isinstance(layer, TimestepBlock):
                 x = layer(x, emb)
             elif isinstance(layer, SpatialTransformer):
-                x = layer(x, context)
+                x = layer(x, context, store, place)
             else:
                 x = layer(x)
         return x
@@ -316,6 +318,7 @@ class AttentionBlock(nn.Module):
         #return pt_checkpoint(self._forward, x)  # pytorch
 
     def _forward(self, x):
+        a = 1/0
         b, c, *spatial = x.shape
         x = x.reshape(b, c, -1)
         qkv = self.qkv(self.norm(x))
@@ -391,6 +394,7 @@ class QKVAttention(nn.Module):
         :param qkv: an [N x (3 * H * C) x T] tensor of Qs, Ks, and Vs.
         :return: an [N x (H * C) x T] tensor after attention.
         """
+        a=1/0
         bs, width, length = qkv.shape
         assert width % (3 * self.n_heads) == 0
         ch = width // (3 * self.n_heads)
@@ -468,6 +472,7 @@ class UNetModel(nn.Module):
         legacy=True,
     ):
         super().__init__()
+        self.attention_store = AttentionStore()
         if use_spatial_transformer:
             assert context_dim is not None, 'Fool!! You forgot to include the dimension of your cross-attention conditioning...'
 
@@ -720,8 +725,13 @@ class UNetModel(nn.Module):
             self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
         hs = []
+
+
         t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
         emb = self.time_embed(t_emb)
+
+
+
 
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
@@ -729,12 +739,17 @@ class UNetModel(nn.Module):
 
         h = x.type(self.dtype)
         for module in self.input_blocks:
-            h = module(h, emb, context)
+
+            h = module(h, emb, context,self.attention_store,"up")
             hs.append(h)
-        h = self.middle_block(h, emb, context)
+
+        h = self.middle_block(h, emb, context,self.attention_store,"mid")
+
+
         for module in self.output_blocks:
+
             h = th.cat([h, hs.pop()], dim=1)
-            h = module(h, emb, context)
+            h = module(h, emb, context,self.attention_store,"down")
         h = h.type(x.dtype)
         if self.predict_codebook_ids:
             return self.id_predictor(h)
@@ -942,8 +957,9 @@ class EncoderUNetModel(nn.Module):
         :param timesteps: a 1-D batch of timesteps.
         :return: an [N x K] Tensor of outputs.
         """
+        
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-
+        
         results = []
         h = x.type(self.dtype)
         for module in self.input_blocks:
