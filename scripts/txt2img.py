@@ -88,6 +88,20 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--idx1",
+        type=int,
+        default=0,
+        help="First Attend and Excite Index",
+    )
+
+    parser.add_argument(
+        "--idx2",
+        type=int,
+        default=0,
+        help="Second Attend and Excite Index",
+    )
+
+    parser.add_argument(
         "--n_samples",
         type=int,
         default=4,
@@ -122,6 +136,7 @@ if __name__ == "__main__":
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to(device)
 
+
     if opt.plms:
         sampler = PLMSSampler(model)
     else:
@@ -146,6 +161,7 @@ if __name__ == "__main__":
             for n in trange(opt.n_iter, desc="Sampling"):
                 c = model.get_learned_conditioning(opt.n_samples * [prompt])
                 shape = [4, opt.H//8, opt.W//8]
+
                 samples_ddim, _ = sampler.sample(S=opt.ddim_steps,
                                                  conditioning=c,
                                                  batch_size=opt.n_samples,
@@ -153,7 +169,11 @@ if __name__ == "__main__":
                                                  verbose=False,
                                                  unconditional_guidance_scale=opt.scale,
                                                  unconditional_conditioning=uc,
-                                                 eta=opt.ddim_eta)
+                                                 idx1=opt.idx1,
+                                                 idx2=opt.idx2,
+                                                 refine=True,
+                                                 eta=opt.ddim_eta
+                                                 )
 
                 x_samples_ddim = model.decode_first_stage(samples_ddim)
                 x_samples_ddim = torch.clamp((x_samples_ddim+1.0)/2.0, min=0.0, max=1.0)

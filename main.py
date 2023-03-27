@@ -584,6 +584,7 @@ if __name__ == "__main__":
         lightning_config = config.pop("lightning", OmegaConf.create())
         # merge trainer cli with config
         trainer_config = lightning_config.get("trainer", OmegaConf.create())
+
         # default to ddp
         trainer_config["accelerator"] = "ddp"
         for k in nondefault_trainer_args(opt):
@@ -800,6 +801,7 @@ if __name__ == "__main__":
         # run
         if opt.train:
             try:
+
                 trainer.fit(model, data)
             except Exception:
                 melk()
